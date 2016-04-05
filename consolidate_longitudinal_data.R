@@ -97,11 +97,11 @@ multihit.gr$timepoint <- intsite_join_tb[match(multihit.gr$sampleName, intsite_j
 
 #Unique Site Tracking
 unique.grl <- split(unique.gr, unique.gr$patient)
-unique.std <- unlist(GRangesList(lapply(unique.grl, function(sites){
+unique.std <- unlist(GRangesList(lapply(unique.grl, function(sites){  
   standardize_intsites(sites, standardize_breakpoints = breakpoint.correction)
 })))
-!!!unique.cond <- unlist(GRangesList(lapply(split(unique.std, unique.std$specimen), 
-                                         function(sites){
+unique.list <- split(unique.std, unique.std$specimen)
+unique.cond <- unlist(GRangesList(lapply(unique.list, function(sites){
   cond.sites <- condense_intsites(sites, return.abundance = TRUE, 
                                   method = sonic.method, replicates = "sampleName")
   mcols(cond.sites)[, c("sampleName", "sampleID", "siteID", "count")] <- NULL
@@ -111,8 +111,12 @@ unique.std <- unlist(GRangesList(lapply(unique.grl, function(sites){
 patient.list <- split(unique.cond, unique.cond$patient)
 longitudinal.list <- lapply(patient.list, function(gr) split(gr, gr$timepoint))
 longitudinal.list <- longitudinal.list[sapply(longitudinal.list, length) >= 2]
-long.track <- lapply(longitudinal.list, function(grl) track_clones(grl))
+longitudinal.sites <- lapply(longitudinal.list, track_clones, track.origin = FALSE)
 
+contam.sites <- track_clones(patient.list, track.origin = FALSE)
 
+distinct.sites <- lapply(longitudinal.sites, function(sites){
+  sites[!names(sites) %in% names(contam.sites)]
+})
 
-
+crossover.sites <- contam.sites[names(contam.sites) %in% unlist(sapply(longitudinal.sites, names))]
