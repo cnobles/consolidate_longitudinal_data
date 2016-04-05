@@ -100,23 +100,40 @@ unique.grl <- split(unique.gr, unique.gr$patient)
 unique.std <- unlist(GRangesList(lapply(unique.grl, function(sites){  
   standardize_intsites(sites, standardize_breakpoints = breakpoint.correction)
 })))
-unique.list <- split(unique.std, unique.std$specimen)
-unique.cond <- unlist(GRangesList(lapply(unique.list, function(sites){
-  cond.sites <- condense_intsites(sites, return.abundance = TRUE, 
-                                  method = sonic.method, replicates = "sampleName")
-  mcols(cond.sites)[, c("sampleName", "sampleID", "siteID", "count")] <- NULL
-  cond.sites
-})))
+#unique.list <- split(unique.std, unique.std$specimen)
+#unique.cond <- unlist(GRangesList(lapply(unique.list, function(sites){
+#  cond.sites <- condense_intsites(sites, return.abundance = TRUE, 
+#                                  method = sonic.method, replicates = "sampleName")
+#  mcols(cond.sites)[, c("sampleName", "sampleID", "siteID", "count")] <- NULL
+#  cond.sites
+#})))
 
-patient.list <- split(unique.cond, unique.cond$patient)
+#patient.list <- split(unique.cond, unique.cond$patient)
+patient.list <- split(unique.std, unique.std$patient)
 longitudinal.list <- lapply(patient.list, function(gr) split(gr, gr$timepoint))
 longitudinal.list <- longitudinal.list[sapply(longitudinal.list, length) >= 2]
 longitudinal.sites <- lapply(longitudinal.list, track_clones, track.origin = FALSE)
 
 contam.sites <- track_clones(patient.list, track.origin = FALSE)
-
+crossover.sites <- contam.sites[names(contam.sites) %in% unlist(sapply(longitudinal.sites, names))]
 distinct.sites <- lapply(longitudinal.sites, function(sites){
   sites[!names(sites) %in% names(contam.sites)]
 })
 
-crossover.sites <- contam.sites[names(contam.sites) %in% unlist(sapply(longitudinal.sites, names))]
+analyze_bps <- function(grl_of_sites){ #grl needs to be split by posid
+  bind_rows(lapply(grl_of_sites, function(sites){
+    grl <- split(sites, width(sites))
+    total.bp <- length(grl)
+    patient.crossover.count <- length(grep(TRUE, sapply(grl, function(x) length(unique(x$patient)) > 1)))
+    patient.crossover <- patient.crossover.count > 0
+    replicate.crossover.count <- length(grep(TRUE, sapply(grl, function(x) length(unique(x$sampleName)) > 1)))
+    replicate.crossover <- replicate.crossover.count > 0
+    data.frame("site" = unique(generate_posID(sites)), "total.bps" = total.bp, 
+               "patient.crossover" = patient.crossover, "patient.co.count" = patient.crossover.count,
+               "replicate.crossover" = replicate.crossover, "replicate.co.count" = replicate.crossover.count)
+  }))
+}
+
+contam.shared.bp <- analyze_bps(contam.sites)
+crossover.shared.bp <- analyze_bps(crossover.sites)
+distinct.shared.bp <- lapply(distinct.sites, analyze_bps)
