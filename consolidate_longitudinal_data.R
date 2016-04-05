@@ -1,5 +1,6 @@
 #Load required dependancies
-rPackages <- c("RMySQL", "plyr", "dplyr", "magrittr", "GenomicRanges", "Biostrings", "igraph", "argparse", "sonicLength", "devtools") 
+rPackages <- c("RMySQL", "plyr", "dplyr", "magrittr", "GenomicRanges", "hiAnnotator",
+               "Biostrings", "igraph", "argparse", "sonicLength", "devtools") 
 stopifnot(all(sapply(rPackages, require, character.only=TRUE, quietly=TRUE, warn.conflicts=FALSE)))
 
 #Set up and gather commandline arguments
@@ -10,7 +11,7 @@ setArguments <- function(){
   parser$add_argument("-s", action = 'store_true', help = "Abundance by sonicLength package (Berry, C. 2012).")
   parser$add_argument("-b", "--bp_corr", action = "store_true", help = "Correct breakpoint variation from pcr amplification.")
   parser$add_argument("-a", "--all_pats", action = "store_true", help = "Run analysis with all patients, not just longitudinal.")
-  
+
   arguments <- parser$parse_args()
   arguments
 }
@@ -84,6 +85,8 @@ junk <- sapply(dbListConnections(MySQL()), dbDisconnect)
 
 #Analyze integration sites
 source_url("https://raw.githubusercontent.com/cnobles/cloneTracker/master/cloneTracker.SOURCE_ME.R")
+freeze <- unique(intsite_join_tb$refGenome)
+
 unique.gr <- db_to_granges(sites.uniq, keep.additional.columns = TRUE)
 unique.gr$patient <- intsite_join_tb[match(unique.gr$sampleName, intsite_join_tb$childAlias), "patient"]
 unique.gr$specimen <- paste0(unique.gr$specimen, "-",
@@ -137,3 +140,34 @@ analyze_bps <- function(grl_of_sites){ #grl needs to be split by posid
 contam.shared.bp <- analyze_bps(contam.sites)
 crossover.shared.bp <- analyze_bps(crossover.sites)
 distinct.shared.bp <- lapply(distinct.sites, analyze_bps)
+
+#Annotate sites
+annotate_sites <- function(sites, ref_seqs){
+  sites <- doAnnotation(annotType = "within", sites, ref_seqs, colnam = "WithinGene",
+                        feature.colnam = "name2", asBool = FALSE)
+  sites <- doAnnotation(annotType = "nearest", sites, ref_seqs, colnam = "NearestGeneStart",
+                        side = "5p", feature.colnam = "name2")
+  sites <- doAnnotation(annotType = "nearest", sites, ref_seqs, colnam = "NearestGene",
+                        feature.colnam = "name2")
+  sites
+}
+
+makeUCSCsession(freeze=freeze)
+ref.genes <- getUCSCtable("refGene", "RefSeq Genes", bsession=NULL, freeze=freeze)
+genes.gr <- makeGRanges(ref.genes)
+
+contam.sites.info <- unlist(GRangesList(lapply(contam.sites, function(sites){
+  reduce(flank(sites, -1, start = TRUE), min.gapwidth = 0L)
+})))
+crossover.sites.info <- unlist(GRangesList(lapply(crossover.sites, function(sites){
+  reduce(flank(sites, -1, start = TRUE), min.gapwidth = 0L)
+})))
+distinct.sites.info <- lapply(distinct.sites, function(grl){
+  unlist(GRangesList(lapply(grl, function(sites) reduce(flank(sites, -1, start = TRUE), min.gapwidth = 0L))))
+})
+distinct.sites.info <- distinct.sites.info[sapply(distinct.sites.info, length) > 0]
+
+contam.sites.info <- annotate_sites(contam.sites.info, genes.gr)
+crossover.sites.info <- annotate_sites(crossover.sites.info, genes.gr)
+distinct.sites.info <- lapply(distinct.sites.info, annotate_sites, ref_seqs = genes.gr)
+
