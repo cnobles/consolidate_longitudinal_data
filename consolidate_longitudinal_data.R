@@ -123,6 +123,11 @@ distinct.sites <- lapply(longitudinal.sites, function(sites){
   sites[!names(sites) %in% names(contam.sites)]
 })
 
+intSites <- list(distinct.sites, crossover.sites, contam.sites)
+names(intSites) <- c("distinct.sites", "crossover.sites", "contam.sites")
+
+save(intSites, file = "intSites.RData")
+
 analyze_bps <- function(grl_of_sites){ #grl needs to be split by posid
   bind_rows(lapply(grl_of_sites, function(sites){
     grl <- split(sites, width(sites))
@@ -140,6 +145,11 @@ analyze_bps <- function(grl_of_sites){ #grl needs to be split by posid
 contam.shared.bp <- analyze_bps(contam.sites)
 crossover.shared.bp <- analyze_bps(crossover.sites)
 distinct.shared.bp <- lapply(distinct.sites, analyze_bps)
+
+bp.analysis <- list(distinct.shared.bp, crossover.shared.bp, contam.shared.bp)
+names(bp.analysis) <- c("distinct.sites", "crossover.sites", "contam.sites")
+
+save(bp.analysis, file = "bp.analysis.RData")
 
 #Annotate sites
 annotate_sites <- function(sites, ref_seqs){
@@ -171,3 +181,7 @@ contam.sites.info <- annotate_sites(contam.sites.info, genes.gr)
 crossover.sites.info <- annotate_sites(crossover.sites.info, genes.gr)
 distinct.sites.info <- lapply(distinct.sites.info, annotate_sites, ref_seqs = genes.gr)
 
+intSites.info <- list(distinct.sites.info, crossover.sites.info, contam.sites.info)
+names(intSites.info) <- c("distinct.sites", "crossover.sites", "contam.sites")
+
+save(intSites.info, file = "intSites.info.RData")
