@@ -128,6 +128,7 @@ names(intSites) <- c("distinct.sites", "crossover.sites", "contam.sites")
 
 save(intSites, file = "intSites.RData")
 
+#Analyze breakpoint sharing of fragments
 analyze_bps <- function(grl_of_sites){ #grl needs to be split by posid
   bind_rows(lapply(grl_of_sites, function(sites){
     grl <- split(sites, width(sites))
