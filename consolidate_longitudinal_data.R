@@ -87,6 +87,20 @@ junk <- sapply(dbListConnections(MySQL()), dbDisconnect)
 source_url("https://raw.githubusercontent.com/cnobles/cloneTracker/master/cloneTracker.SOURCE_ME.R")
 freeze <- unique(intsite_join_tb$refGenome)
 
+annotate_sites <- function(sites, ref_seqs){
+  sites <- doAnnotation(annotType = "within", sites, ref_seqs, colnam = "WithinGene",
+                        feature.colnam = "name2", asBool = FALSE)
+  sites <- doAnnotation(annotType = "nearest", sites, ref_seqs, colnam = "NearestGeneStart",
+                        side = "5p", feature.colnam = "name2")
+  sites <- doAnnotation(annotType = "nearest", sites, ref_seqs, colnam = "NearestGene",
+                        feature.colnam = "name2")
+  sites
+}
+
+makeUCSCsession(freeze=freeze)
+ref.genes <- getUCSCtable("refGene", "RefSeq Genes", bsession=NULL, freeze=freeze)
+genes.gr <- makeGRanges(ref.genes)
+
 unique.gr <- db_to_granges(sites.uniq, keep.additional.columns = TRUE)
 unique.gr$patient <- intsite_join_tb[match(unique.gr$sampleName, intsite_join_tb$childAlias), "patient"]
 unique.gr$specimen <- paste0(unique.gr$specimen, "-",
@@ -103,16 +117,31 @@ unique.grl <- split(unique.gr, unique.gr$patient)
 unique.std <- unlist(GRangesList(lapply(unique.grl, function(sites){  
   standardize_intsites(sites, standardize_breakpoints = breakpoint.correction)
 })))
-#unique.list <- split(unique.std, unique.std$specimen)
-#unique.cond <- unlist(GRangesList(lapply(unique.list, function(sites){
-#  cond.sites <- condense_intsites(sites, return.abundance = TRUE, 
-#                                  method = sonic.method, replicates = "sampleName")
-#  mcols(cond.sites)[, c("sampleName", "sampleID", "siteID", "count")] <- NULL
-#  cond.sites
-#})))
 
-#patient.list <- split(unique.cond, unique.cond$patient)
-patient.list <- split(unique.std, unique.std$patient)
+allSites <- unique.std
+mcols(allSites) <- mcols(allSites)[,c("sampleName", "specimen", "patient", "timepoint", "count", "refGenome")]
+write.table(as.data.frame(allSites, row.names = NULL), file = "allSites.tsv", 
+            quote = FALSE, sep = "\t", row.names = FALSE)
+
+unique.cond <- condense_intsites(unique.std, grouping = "specimen", 
+                                 return.abundance = TRUE, method = sonic.method,
+                                 replicates = "sampleName")
+mcols(unique.cond) <- mcols(unique.cond)[, c("specimen", "refGenome", "patient",
+                                             "timepoint", "estAbund", "relAbund",
+                                             "relRank", "posID")]
+finalSites <- as.data.frame(
+  annotate_sites(unique.cond, genes.gr), 
+  row.names = NULL)
+finalSites$position <- finalSites$start
+finalSites <- finalSites[, c("seqnames", "strand", "position", "posID", "specimen", 
+                             "patient", "timepoint", "estAbund", "relAbund", 
+                             "relRank", "WithinGene", "WithinGeneOrt", "X5pNearestGeneStartDist", 
+                             "X5pNearestGeneStart", "X5pNearestGeneStartOrt", "NearestGeneDist", 
+                             "NearestGene", "NearestGeneOrt", "refGenome")]
+write.table(finalSites, file = "finalSites.tsv", 
+            quote = FALSE, sep = "\t", row.names = FALSE)
+
+patient.list <- split(unique.cond, unique.cond$patient)
 longitudinal.list <- lapply(patient.list, function(gr) split(gr, gr$timepoint))
 longitudinal.list <- longitudinal.list[sapply(longitudinal.list, length) >= 2]
 longitudinal.sites <- lapply(longitudinal.list, track_clones, track.origin = FALSE)
@@ -127,6 +156,33 @@ intSites <- list(distinct.sites, crossover.sites, contam.sites)
 names(intSites) <- c("distinct.sites", "crossover.sites", "contam.sites")
 
 save(intSites, file = "intSites.RData")
+
+longitudinalSites <- as.data.frame(
+  annotate_sites(unlist(GRangesList(lapply(distinct.sites, unlist))), genes.gr), 
+  row.names = NULL)
+longitudinalSites$position <- longitudinalSites$start
+longitudinalSites <- longitudinalSites[, c("seqnames", "strand", "position", "posID", "specimen", 
+                                           "patient", "timepoint", "estAbund", "relAbund", 
+                                           "relRank", "WithinGene", "WithinGeneOrt", "X5pNearestGeneStartDist", 
+                                           "X5pNearestGeneStart", "X5pNearestGeneStartOrt", "NearestGeneDist", 
+                                           "NearestGene", "NearestGeneOrt", "refGenome")]
+write.table(longitudinalSites, file = "longitudinalSites.tsv",
+            quote = FALSE, sep = "\t", row.names = FALSE)
+
+crossoverSites <- as.data.frame(
+  annotate_sites(unlist(contam.sites), genes.gr), 
+  row.names = NULL)
+crossoverSites$position <- crossoverSites$start
+crossoverSites <- crossoverSites[, c("seqnames", "strand", "position", "posID", "specimen", 
+                                     "patient", "timepoint", "estAbund", "relAbund", 
+                                     "relRank", "WithinGene", "WithinGeneOrt", "X5pNearestGeneStartDist", 
+                                     "X5pNearestGeneStart", "X5pNearestGeneStartOrt", "NearestGeneDist", 
+                                     "NearestGene", "NearestGeneOrt", "refGenome")]
+write.table(crossoverSites, file = "crossoverSites.tsv",
+            quote = FALSE, sep = "\t", row.names = FALSE)
+
+write.table(unique(crossoverSites$posID), file = "crossoverPosIDs.tsv",
+            quote = FALSE, sep = "\t", row.names = FALSE, col.names = FALSE)
 
 #Analyze breakpoint sharing of fragments
 analyze_bps <- function(grl_of_sites){ #grl needs to be split by posid
@@ -143,9 +199,20 @@ analyze_bps <- function(grl_of_sites){ #grl needs to be split by posid
   }))
 }
 
-contam.shared.bp <- analyze_bps(contam.sites)
-crossover.shared.bp <- analyze_bps(crossover.sites)
-distinct.shared.bp <- lapply(distinct.sites, analyze_bps)
+patient.std.list <- split(unique.std, unique.std$patient)
+longitudinal.std.list <- lapply(patient.list, function(gr) split(gr, gr$timepoint))
+longitudinal.std.list <- longitudinal.std.list[sapply(longitudinal.std.list, length) >= 2]
+longitudinal.std.sites <- lapply(longitudinal.std.list, track_clones, track.origin = FALSE)
+
+contam.std.sites <- track_clones(patient.std.list, track.origin = FALSE)
+crossover.std.sites <- contam.sites[names(contam.sites) %in% unlist(sapply(longitudinal.sites, names))]
+distinct.std.sites <- lapply(longitudinal.sites, function(sites){
+  sites[!names(sites) %in% names(contam.std.sites)]
+})
+
+contam.shared.bp <- analyze_bps(contam.std.sites)
+crossover.shared.bp <- analyze_bps(crossover.std.sites)
+distinct.shared.bp <- lapply(distinct.std.sites, analyze_bps)
 
 bp.analysis <- list(distinct.shared.bp, crossover.shared.bp, contam.shared.bp)
 names(bp.analysis) <- c("distinct.sites", "crossover.sites", "contam.sites")
@@ -153,20 +220,6 @@ names(bp.analysis) <- c("distinct.sites", "crossover.sites", "contam.sites")
 save(bp.analysis, file = "bp.analysis.RData")
 
 #Annotate sites
-annotate_sites <- function(sites, ref_seqs){
-  sites <- doAnnotation(annotType = "within", sites, ref_seqs, colnam = "WithinGene",
-                        feature.colnam = "name2", asBool = FALSE)
-  sites <- doAnnotation(annotType = "nearest", sites, ref_seqs, colnam = "NearestGeneStart",
-                        side = "5p", feature.colnam = "name2")
-  sites <- doAnnotation(annotType = "nearest", sites, ref_seqs, colnam = "NearestGene",
-                        feature.colnam = "name2")
-  sites
-}
-
-makeUCSCsession(freeze=freeze)
-ref.genes <- getUCSCtable("refGene", "RefSeq Genes", bsession=NULL, freeze=freeze)
-genes.gr <- makeGRanges(ref.genes)
-
 contam.sites.info <- unlist(GRangesList(lapply(contam.sites, function(sites){
   reduce(flank(sites, -1, start = TRUE), min.gapwidth = 0L)
 })))
@@ -186,3 +239,39 @@ intSites.info <- list(distinct.sites.info, crossover.sites.info, contam.sites.in
 names(intSites.info) <- c("distinct.sites", "crossover.sites", "contam.sites")
 
 save(intSites.info, file = "intSites.info.RData")
+
+siteInfo <- sort(unique(granges(unique.cond)))
+siteInfo$posID <- generate_posID(siteInfo)
+siteInfo <- annotate_sites(siteInfo, genes.gr)
+siteInfo <- as.data.frame(siteInfo, row.names = NULL)
+siteInfo$position <- siteInfo$start
+siteInfo <- siteInfo[, c("seqnames", "strand", "position", "posID", "WithinGene", 
+                           "WithinGeneOrt", "X5pNearestGeneStartDist", "X5pNearestGeneStart", 
+                           "X5pNearestGeneStartOrt", "NearestGeneDist", "NearestGene", "NearestGeneOrt")]
+write.table(siteInfo, file = "siteInfo.tsv", quote = FALSE, sep = "\t",
+            row.names = FALSE)
+
+#site.info <- lapply(1:length(intSites.info), function(i){
+#  sites <- intSites.info[[i]]
+#  if(class(sites) == "list"){
+#    sites.list <- lapply(1:length(sites), function(j){
+#      patient <- names(sites[j])
+#      patient.sites <- sites[[j]]
+#      mcols(patient.sites)$Patient <- patient
+#      patient.sites
+#    })
+#    sites <- do.call(c, lapply(1:length(sites.list), function(i) sites.list[[i]]))
+#  }else{
+#    mcols(sites)$Patient <- "NA"
+#  }
+#  typeTable <- data.frame(row.names = names(intSites.info),
+#                          "siteType" = c("distinct", "crossover", "contaminating"))
+#  sites$siteType <- typeTable[names(intSites.info[i]), "siteType"]
+#  sites
+#})
+#site.info <- do.call(c, lapply(1:length(site.info), function(i) site.info[[i]]))
+#site.info$posid <- names(site.info)
+#names(site.info) <- NULL
+#mcols(site.info) <- mcols(site.info)[,c("siteType", "posid", "Patient", "WithinGene", "WithinGeneOrt", 
+#  "X5pNearestGeneStartDist", "X5pNearestGeneStart", "X5pNearestGeneStartOrt", 
+#  "NearestGeneDist", "NearestGene", "NearestGeneOrt")]
